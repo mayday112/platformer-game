@@ -20,7 +20,7 @@ export interface GameStatus {
 export type GameEvent =
   | { type: 'STATUS_UPDATE'; payload: GameStatus }
   | { type: 'LEVEL_START'; payload: { levelId: number; name: string } }
-  | { type: 'LEVEL_COMPLETE'; payload: { levelId: number; score: number; crystals: number } }
+  | { type: 'LEVEL_COMPLETE'; payload: { levelId: number; levelIndex: number; score: number; crystals: number } }
   | { type: 'GAME_OVER'; payload: { levelId: number; reason: string } }
   | { type: 'GAME_VICTORY'; payload: { totalScore: number; totalCrystals: number } }
   | { type: 'DIALOGUE'; payload: { speaker: string; text: string; avatar: 'hero' | 'boss' } };

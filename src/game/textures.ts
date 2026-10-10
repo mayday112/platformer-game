@@ -334,14 +334,22 @@ export function generateGameTextures(scene: Phaser.Scene) {
     ctx.stroke();
   });
 
-  // 3.4 Particle Sparkle (6x6)
-  createPixelTexture('particle_sparkle', 6, 6, (ctx) => {
-    ctx.fillStyle = '#7dd3fc';
-    ctx.fillRect(2, 0, 2, 6);
-    ctx.fillRect(0, 2, 6, 2);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(2, 2, 2, 2);
-  });
+  // 3.4 Particle Sparkles (6x6) with crisp baked colors (zero tint dependency)
+  const drawSparkle = (key: string, outerColor: string, innerColor: string) => {
+    createPixelTexture(key, 6, 6, (ctx) => {
+      ctx.fillStyle = outerColor;
+      ctx.fillRect(2, 0, 2, 6);
+      ctx.fillRect(0, 2, 6, 2);
+      ctx.fillStyle = innerColor;
+      ctx.fillRect(2, 2, 2, 2);
+    });
+  };
+  drawSparkle('particle_sparkle', '#7dd3fc', '#ffffff');
+  drawSparkle('particle_sparkle_cyan', '#38bdf8', '#ffffff');
+  drawSparkle('particle_sparkle_purple', '#c084fc', '#f3e8ff');
+  drawSparkle('particle_sparkle_emerald', '#34d399', '#ffffff');
+  drawSparkle('particle_sparkle_gold', '#fbbf24', '#fef3c7');
+  drawSparkle('particle_sparkle_crimson', '#f87171', '#ffffff');
 
   // 4. PLAYER HERO: "LYRA" (Azure-haired Rune Knight)
   // Sprite size: 24x30 pixels. We create:

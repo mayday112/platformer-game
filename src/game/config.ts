@@ -6,7 +6,10 @@
 import Phaser from 'phaser';
 import { GameScene } from './GameScene';
 
-export function createPhaserGame(parentContainer: HTMLElement): Phaser.Game {
+export function createPhaserGame(
+  parentContainer: HTMLElement,
+  startData: { levelIndex: number; score?: number; crystals?: number } = { levelIndex: 0 }
+): Phaser.Game {
   const config: Phaser.Types.Core.GameConfig = {
     type: Phaser.AUTO,
     parent: parentContainer,
@@ -28,8 +31,13 @@ export function createPhaserGame(parentContainer: HTMLElement): Phaser.Game {
         debug: false,
       },
     },
-    scene: [GameScene],
   };
 
-  return new Phaser.Game(config);
+  const game = new Phaser.Game(config);
+  game.scene.add('GameScene', GameScene, false);
+  game.events.once(Phaser.Core.Events.READY, () => {
+    game.scene.start('GameScene', startData);
+  });
+
+  return game;
 }

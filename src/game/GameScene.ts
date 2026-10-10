@@ -61,6 +61,8 @@ export class GameScene extends Phaser.Scene {
   private bossMaxHp: number = 0;
   private bossAttackTimer: number = 0;
   private bossTeleportTimer: number = 0;
+  private bossHoverTween: Phaser.Tweens.Tween | null = null;
+  private isBossInvulnerable: boolean = false;
 
   // Controls
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -95,6 +97,19 @@ export class GameScene extends Phaser.Scene {
     this.hasKey = false;
     this.checkpointActivated = false;
     this.respawnPoint = { ...this.currentLevel.playerStart };
+    this.isInvulnerable = false;
+    this.canDoubleJump = false;
+    this.isDashing = false;
+    this.canDash = true;
+    this.isAttacking = false;
+    this.facingRight = true;
+    this.bossSprite = null;
+    this.bossHp = 0;
+    this.bossMaxHp = 0;
+    this.bossHoverTween = null;
+    this.isBossInvulnerable = false;
+    this.keySprite = null;
+    this.checkpointSprite = null;
   }
 
   preload() {
@@ -345,6 +360,9 @@ export class GameScene extends Phaser.Scene {
     this.player.setGravityY(850);
     this.player.setSize(16, 26);
     this.player.setOffset(4, 4);
+    this.player.setDepth(30);
+    this.player.setAlpha(1);
+    this.player.setVisible(true);
     this.player.play('player_idle');
   }
 
@@ -462,6 +480,11 @@ export class GameScene extends Phaser.Scene {
         projObj.destroy();
         this.damageBoss(1);
       });
+
+      // Player contact damage with Boss
+      this.physics.add.overlap(this.player, this.bossSprite, () => {
+        this.handlePlayerDamage(1, 'Sentuhan Aura Malacor');
+      });
     }
 
     // Player Projectiles hitting Walls
@@ -518,13 +541,17 @@ export class GameScene extends Phaser.Scene {
   private spawnBoss(x: number, y: number, hp: number) {
     this.bossMaxHp = hp;
     this.bossHp = hp;
+    this.isBossInvulnerable = false;
     this.bossSprite = this.physics.add.sprite(x, y, 'boss_malacor_0');
     setNoGravity(this.bossSprite);
     this.bossSprite.setSize(32, 44);
+    this.bossSprite.setDepth(25);
+    this.bossSprite.setAlpha(1);
+    this.bossSprite.setVisible(true);
     this.bossSprite.play('boss_hover');
 
     // Idle hover bob tween
-    this.tweens.add({
+    this.bossHoverTween = this.tweens.add({
       targets: this.bossSprite,
       y: y - 14,
       duration: 1200,
@@ -544,11 +571,15 @@ export class GameScene extends Phaser.Scene {
     sound.playSlash();
 
     this.player.setTexture('player_slash');
+    this.player.setDepth(30);
+    this.player.setAlpha(1);
+    this.player.setVisible(true);
 
     // Spawn slash crescent FX
     const slashOffset = this.facingRight ? 24 : -24;
     const slash = this.add.sprite(this.player.x + slashOffset, this.player.y, 'slash_fx');
     slash.setFlipX(!this.facingRight);
+    slash.setDepth(32);
 
     // Attack Hitbox check
     const hitBox = new Phaser.Geom.Rectangle(
@@ -567,15 +598,18 @@ export class GameScene extends Phaser.Scene {
     });
 
     // Hit Boss
-    if (this.bossSprite && Phaser.Geom.Rectangle.Overlaps(hitBox, this.bossSprite.getBounds())) {
+    if (this.bossSprite && !this.isBossInvulnerable && Phaser.Geom.Rectangle.Overlaps(hitBox, this.bossSprite.getBounds())) {
       this.damageBoss(1);
     }
 
     // Animation settle
     this.time.delayedCall(200, () => {
-      slash.destroy();
+      if (slash.active) slash.destroy();
       this.isAttacking = false;
-      if (this.player.active) {
+      if (this.player && this.player.active) {
+        this.player.setAlpha(1);
+        this.player.setVisible(true);
+        this.player.setDepth(30);
         this.player.play('player_idle', true);
       }
     });
@@ -603,6 +637,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   public handleDash() {
+    if (!this.player || !this.player.active || !this.player.body) return;
     if (!this.canDash || this.isDashing) return;
     this.isDashing = true;
     this.canDash = false;
@@ -619,8 +654,7 @@ export class GameScene extends Phaser.Scene {
         if (!this.player.active) return;
         const ghost = this.add.sprite(this.player.x, this.player.y, 'player_dash');
         ghost.setFlipX(!this.facingRight);
-        ghost.setAlpha(0.6);
-        ghost.setTint(0x38bdf8);
+        ghost.setAlpha(0.5);
         this.tweens.add({
           targets: ghost,
           alpha: 0,
@@ -634,6 +668,8 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(180, () => {
       this.isDashing = false;
       if (this.player.active) {
+        this.player.setAlpha(1);
+        this.player.setVisible(true);
         this.player.play('player_idle', true);
       }
     });
@@ -654,20 +690,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   private damageBoss(dmg: number) {
-    if (!this.bossSprite || this.bossHp <= 0) return;
+    if (!this.bossSprite || this.bossHp <= 0 || this.isBossInvulnerable) return;
+    this.isBossInvulnerable = true;
     this.bossHp -= dmg;
     sound.playBossHurt();
     this.broadcastStatus();
 
-    this.bossSprite.setTint(0xef4444);
-    this.cameras.main.shake(150, 0.01);
-    this.createSparkles(this.bossSprite.x, this.bossSprite.y, 0xa855f7);
+    // Damage visual feedback: Alpha hurt flicker (100% stable, zero shader tint division-by-zero artifacts)
+    this.bossSprite.setAlpha(0.25);
+    this.time.delayedCall(120, () => {
+      if (this.bossSprite && this.bossSprite.active) {
+        this.bossSprite.setAlpha(1);
+        this.bossSprite.setVisible(true);
+      }
+    });
+
+    this.cameras.main.shake(120, 0.008);
+    this.createSparkles(this.bossSprite.x, this.bossSprite.y, 'purple', 14);
     this.showFloatingText(this.bossSprite.x, this.bossSprite.y - 20, '-1 HP', '#ef4444');
 
-    this.time.delayedCall(250, () => {
-      if (this.bossSprite && this.bossSprite.active) {
-        this.bossSprite.clearTint();
-      }
+    // Reset boss invulnerability window after 450ms
+    this.time.delayedCall(450, () => {
+      this.isBossInvulnerable = false;
     });
 
     // Boss Defeated
@@ -676,7 +720,14 @@ export class GameScene extends Phaser.Scene {
       this.score += 500;
       this.broadcastStatus();
 
-      this.createSparkles(this.bossSprite.x, this.bossSprite.y, 0xf59e0b, 30);
+      if (this.bossHoverTween) {
+        this.bossHoverTween.stop();
+        this.tweens.remove(this.bossHoverTween);
+        this.bossHoverTween = null;
+      }
+      this.tweens.killTweensOf(this.bossSprite);
+
+      this.createSparkles(this.bossSprite.x, this.bossSprite.y, 'gold', 30);
       this.tweens.add({
         targets: this.bossSprite,
         alpha: 0,
@@ -698,31 +749,73 @@ export class GameScene extends Phaser.Scene {
         },
       });
     } else {
-      // Teleport boss to different ledge
+      // Teleport boss to different open aerial position
       this.teleportBoss();
     }
   }
 
   private teleportBoss() {
-    if (!this.bossSprite) return;
-    const targetSpots = [
-      { x: 800, y: 340 },
-      { x: 1080, y: 280 },
-      { x: 1370, y: 340 },
-      { x: 1100, y: 440 },
-    ];
-    const spot = Phaser.Utils.Array.GetRandom(targetSpots);
+    if (!this.bossSprite || !this.bossSprite.active) return;
 
-    this.createSparkles(this.bossSprite.x, this.bossSprite.y, 0x9333ea);
+    // Aerial combat hovering coordinates within the arena in open air
+    const targetSpots = [
+      { x: 860, y: 310 },
+      { x: 1150, y: 240 },
+      { x: 1430, y: 310 },
+      { x: 1000, y: 380 },
+      { x: 1300, y: 380 },
+    ];
+
+    // Pick a spot different from current spot
+    const currentX = this.bossSprite.x;
+    const candidates = targetSpots.filter((s) => Math.abs(s.x - currentX) > 80);
+    const spot = candidates.length > 0 ? Phaser.Utils.Array.GetRandom(candidates) : Phaser.Utils.Array.GetRandom(targetSpots);
+
+    // Stop previous hover tween so it does not drag boss back to old Y
+    if (this.bossHoverTween) {
+      this.bossHoverTween.stop();
+      this.tweens.remove(this.bossHoverTween);
+      this.bossHoverTween = null;
+    }
+    this.tweens.killTweensOf(this.bossSprite);
+
+    // Departure sparkles
+    this.createSparkles(this.bossSprite.x, this.bossSprite.y, 'purple', 14);
+
+    // Relocate boss
     this.bossSprite.setPosition(spot.x, spot.y);
-    this.createSparkles(spot.x, spot.y, 0x9333ea);
+    if (this.bossSprite.body) {
+      this.bossSprite.body.reset(spot.x, spot.y);
+      setNoGravity(this.bossSprite);
+      this.bossSprite.setVelocity(0, 0);
+    }
+    this.bossSprite.setDepth(25);
+    this.bossSprite.setAlpha(1);
+    this.bossSprite.setVisible(true);
+
+    // Ensure boss animation is running
+    this.bossSprite.play('boss_hover', true);
+
+    // Arrival sparkles
+    this.createSparkles(spot.x, spot.y, 'purple', 14);
+
+    // Start fresh hover bob at new position
+    this.bossHoverTween = this.tweens.add({
+      targets: this.bossSprite,
+      y: spot.y - 12,
+      duration: 1100,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
   }
 
   private bossCastSpell() {
-    if (!this.bossSprite || this.bossHp <= 0) return;
+    if (!this.bossSprite || !this.bossSprite.active || this.bossHp <= 0) return;
     // Cast shadow bullet targeting player
     const orb = this.enemyProjectiles.create(this.bossSprite.x, this.bossSprite.y, 'bullet_enemy') as Phaser.Physics.Arcade.Sprite;
     setNoGravity(orb);
+    orb.setDepth(28);
     this.physics.moveToObject(orb, this.player, 180);
 
     this.time.delayedCall(2500, () => {
@@ -731,6 +824,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handlePlayerDamage(amount: number, reason: string) {
+    if (!this.player || !this.player.active || !this.player.body) return;
     if (this.isInvulnerable || this.isDashing) return;
 
     this.playerHp -= amount;
@@ -740,19 +834,25 @@ export class GameScene extends Phaser.Scene {
 
     this.cameras.main.shake(120, 0.008);
     this.player.setVelocityY(-180);
-    this.player.setTint(0xef4444);
+
+    // Reset alpha and ensure visibility without WebGL tint shader errors
+    this.tweens.killTweensOf(this.player);
+    this.player.setAlpha(1);
+    this.player.setVisible(true);
+    this.player.setDepth(30);
 
     // Invulnerability blinking
     this.tweens.add({
       targets: this.player,
       alpha: 0.3,
-      duration: 120,
+      duration: 100,
       yoyo: true,
-      repeat: 4,
+      repeat: 3,
       onComplete: () => {
-        if (this.player.active) {
-          this.player.clearTint();
+        if (this.player && this.player.active) {
           this.player.setAlpha(1);
+          this.player.setVisible(true);
+          this.player.setDepth(30);
           this.isInvulnerable = false;
         }
       },
@@ -773,6 +873,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleSpringBounce(spring: Phaser.Physics.Arcade.Sprite) {
+    if (!this.player || !this.player.active || !this.player.body) return;
     sound.playSpring();
     this.player.setVelocityY(-560);
     this.canDoubleJump = true;
@@ -895,6 +996,7 @@ export class GameScene extends Phaser.Scene {
         type: 'LEVEL_COMPLETE',
         payload: {
           levelId: this.currentLevel.id,
+          levelIndex: this.levelIndex,
           score: this.score,
           crystals: this.crystalsCollected,
         },
@@ -923,10 +1025,27 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private createSparkles(x: number, y: number, tint: number, count: number = 8) {
+  private createSparkles(x: number, y: number, colorOrTint: number | string = 'cyan', count: number = 8) {
+    let sparkleKey = 'particle_sparkle_cyan';
+    if (typeof colorOrTint === 'string') {
+      sparkleKey = `particle_sparkle_${colorOrTint}`;
+    } else if (colorOrTint === 0xa855f7 || colorOrTint === 0x9333ea) {
+      sparkleKey = 'particle_sparkle_purple';
+    } else if (colorOrTint === 0x10b981 || colorOrTint === 0x059669) {
+      sparkleKey = 'particle_sparkle_emerald';
+    } else if (colorOrTint === 0xf59e0b || colorOrTint === 0xfbbf24) {
+      sparkleKey = 'particle_sparkle_gold';
+    } else if (colorOrTint === 0xef4444 || colorOrTint === 0xf43f5e) {
+      sparkleKey = 'particle_sparkle_crimson';
+    }
+
+    // Fallback if texture not registered
+    if (!this.textures.exists(sparkleKey)) {
+      sparkleKey = 'particle_sparkle';
+    }
+
     for (let i = 0; i < count; i++) {
-      const sp = this.add.sprite(x, y, 'particle_sparkle');
-      sp.setTint(tint);
+      const sp = this.add.sprite(x, y, sparkleKey);
       const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
       const speed = Phaser.Math.Between(30, 90);
       const vx = Math.cos(angle) * speed;
@@ -969,7 +1088,7 @@ export class GameScene extends Phaser.Scene {
   // --- UPDATE LOOP ---
 
   update(time: number, delta: number) {
-    if (!this.player || !this.player.active) return;
+    if (!this.player || !this.player.active || !this.player.body) return;
 
     // Passive mana regeneration
     if (this.mana < this.maxMana) {
@@ -977,35 +1096,38 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Moving platforms physics update
-    this.movingPlatformsGroup.getChildren().forEach((pObj) => {
-      const plat = pObj as Phaser.Physics.Arcade.Sprite;
-      const startX = plat.getData('startX');
-      const startY = plat.getData('startY');
-      const targetX = plat.getData('targetX');
-      const targetY = plat.getData('targetY');
-      const speed = plat.getData('speed');
-      let movingForward = plat.getData('movingForward');
+    if (this.movingPlatformsGroup) {
+      this.movingPlatformsGroup.getChildren().forEach((pObj) => {
+        const plat = pObj as Phaser.Physics.Arcade.Sprite;
+        if (!plat || !plat.active || !plat.body) return;
+        const startX = plat.getData('startX');
+        const startY = plat.getData('startY');
+        const targetX = plat.getData('targetX');
+        const targetY = plat.getData('targetY');
+        const speed = plat.getData('speed');
+        let movingForward = plat.getData('movingForward');
 
-      if (startX !== targetX) {
-        if (movingForward) {
-          plat.setVelocityX(speed);
-          if (plat.x >= Math.max(startX, targetX)) plat.setData('movingForward', false);
-        } else {
-          plat.setVelocityX(-speed);
-          if (plat.x <= Math.min(startX, targetX)) plat.setData('movingForward', true);
+        if (startX !== targetX) {
+          if (movingForward) {
+            plat.setVelocityX(speed);
+            if (plat.x >= Math.max(startX, targetX)) plat.setData('movingForward', false);
+          } else {
+            plat.setVelocityX(-speed);
+            if (plat.x <= Math.min(startX, targetX)) plat.setData('movingForward', true);
+          }
         }
-      }
 
-      if (startY !== targetY) {
-        if (movingForward) {
-          plat.setVelocityY(speed);
-          if (plat.y >= Math.max(startY, targetY)) plat.setData('movingForward', false);
-        } else {
-          plat.setVelocityY(-speed);
-          if (plat.y <= Math.min(startY, targetY)) plat.setData('movingForward', true);
+        if (startY !== targetY) {
+          if (movingForward) {
+            plat.setVelocityY(speed);
+            if (plat.y >= Math.max(startY, targetY)) plat.setData('movingForward', false);
+          } else {
+            plat.setVelocityY(-speed);
+            if (plat.y <= Math.min(startY, targetY)) plat.setData('movingForward', true);
+          }
         }
-      }
-    });
+      });
+    }
 
     // Enemy AI updates
     this.enemiesGroup.getChildren().forEach((eObj) => {
@@ -1140,8 +1262,18 @@ export class GameScene extends Phaser.Scene {
   public respawnAtCheckpoint() {
     this.playerHp = 5;
     this.mana = 100;
-    this.player.enableBody(true, this.respawnPoint.x, this.respawnPoint.y, true, true);
-    this.player.setVelocity(0, 0);
+    if (this.player) {
+      this.player.enableBody(true, this.respawnPoint.x, this.respawnPoint.y, true, true);
+      if (this.player.body) {
+        this.player.setVelocity(0, 0);
+      }
+    }
     this.broadcastStatus();
+  }
+
+  shutdown() {
+    if (this.input && this.input.keyboard) {
+      this.input.keyboard.removeAllListeners();
+    }
   }
 }

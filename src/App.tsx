@@ -102,6 +102,7 @@ export default function App() {
 
         case 'LEVEL_COMPLETE':
           setGameState('LEVEL_CLEAR');
+          setCurrentLevelIndex(event.payload.levelIndex);
           // Update high score & unlocks
           const newScore = Math.max(highScore, event.payload.score);
           setHighScore(newScore);
@@ -145,27 +146,30 @@ export default function App() {
   }, [highScore, totalCrystals]);
 
   // Start or restart Phaser instance
-  const launchGame = useCallback((levelIdx: number) => {
+  const launchGame = useCallback((levelIdx: number, carryScore: number = 0, carryCrystals: number = 0) => {
     setCurrentLevelIndex(levelIdx);
     setGameState('PLAYING');
     setActiveDialogue(null);
 
-    // Destroy existing instance if any
+    // If Phaser is already active and running, smoothly switch scene to next level without destroying canvas!
     if (phaserGameRef.current) {
-      phaserGameRef.current.destroy(true);
-      phaserGameRef.current = null;
+      phaserGameRef.current.scene.start('GameScene', {
+        levelIndex: levelIdx,
+        score: carryScore,
+        crystals: carryCrystals,
+      });
+      return;
     }
 
-    // Wait for DOM container to be ready
+    // Otherwise, create a fresh Phaser instance on first launch
     setTimeout(() => {
       if (containerRef.current) {
-        const game = createPhaserGame(containerRef.current);
+        const game = createPhaserGame(containerRef.current, {
+          levelIndex: levelIdx,
+          score: carryScore,
+          crystals: carryCrystals,
+        });
         phaserGameRef.current = game;
-        // Start level
-        const scene = game.scene.getScene('GameScene') as GameScene;
-        if (scene) {
-          game.scene.start('GameScene', { levelIndex: levelIdx });
-        }
       }
     }, 50);
   }, []);
@@ -212,12 +216,12 @@ export default function App() {
   };
 
   const handleRestartLevel = () => {
-    launchGame(currentLevelIndex);
+    launchGame(currentLevelIndex, 0, 0);
   };
 
   const handleNextLevel = () => {
     const nextIdx = currentLevelIndex + 1;
-    launchGame(nextIdx);
+    launchGame(nextIdx, status.score, status.crystals);
   };
 
   const handleHome = () => {
