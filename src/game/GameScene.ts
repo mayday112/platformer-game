@@ -15,6 +15,12 @@ function setNoGravity(obj: Phaser.GameObjects.GameObject) {
   }
 }
 
+function safeDestroy(obj: Phaser.GameObjects.GameObject | null | undefined) {
+  if (obj && obj.active && (obj as any).scene) {
+    obj.destroy();
+  }
+}
+
 export class GameScene extends Phaser.Scene {
   private levelIndex: number = 0;
   private currentLevel!: LevelData;
@@ -469,15 +475,29 @@ export class GameScene extends Phaser.Scene {
     });
 
     // Player Projectiles hitting Enemies
-    this.physics.add.overlap(this.playerProjectiles, this.enemiesGroup, (projObj, enemyObj) => {
-      projObj.destroy();
-      this.defeatEnemy(enemyObj as Phaser.Physics.Arcade.Sprite);
+    this.physics.add.overlap(this.playerProjectiles, this.enemiesGroup, (objA, objB) => {
+      const proj = this.playerProjectiles.contains(objA as any)
+        ? (objA as Phaser.Physics.Arcade.Sprite)
+        : (objB as Phaser.Physics.Arcade.Sprite);
+      const enemy = this.enemiesGroup.contains(objB as any)
+        ? (objB as Phaser.Physics.Arcade.Sprite)
+        : (objA as Phaser.Physics.Arcade.Sprite);
+
+      safeDestroy(proj);
+      if (enemy && enemy.active && enemy.scene) {
+        this.defeatEnemy(enemy);
+      }
     });
 
     // Player Projectiles hitting Boss
     if (this.bossSprite) {
-      this.physics.add.overlap(this.playerProjectiles, this.bossSprite, (projObj) => {
-        projObj.destroy();
+      this.physics.add.overlap(this.playerProjectiles, this.bossSprite, (objA, objB) => {
+        // Crucial: Determine which object is the projectile and which is the boss
+        const proj = this.playerProjectiles.contains(objA as any)
+          ? (objA as Phaser.Physics.Arcade.Sprite)
+          : (objB as Phaser.Physics.Arcade.Sprite);
+
+        safeDestroy(proj);
         this.damageBoss(1);
       });
 
@@ -488,21 +508,35 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Player Projectiles hitting Walls
-    this.physics.add.collider(this.playerProjectiles, this.platformsGroup, (projObj) => {
-      const p = projObj as Phaser.GameObjects.Sprite;
-      this.createSparkles(p.x, p.y, 0x38bdf8);
-      projObj.destroy();
+    this.physics.add.collider(this.playerProjectiles, this.platformsGroup, (objA, objB) => {
+      const proj = this.playerProjectiles.contains(objA as any)
+        ? (objA as Phaser.Physics.Arcade.Sprite)
+        : (objB as Phaser.Physics.Arcade.Sprite);
+
+      if (proj && proj.active && proj.scene) {
+        this.createSparkles(proj.x, proj.y, 0x38bdf8);
+        safeDestroy(proj);
+      }
     });
 
     // Enemy Projectiles hitting Player
-    this.physics.add.overlap(this.enemyProjectiles, this.player, (projObj) => {
-      projObj.destroy();
+    this.physics.add.overlap(this.enemyProjectiles, this.player, (objA, objB) => {
+      // Crucial: objA may be player and objB projectile or vice-versa
+      const proj = this.enemyProjectiles.contains(objA as any)
+        ? (objA as Phaser.Physics.Arcade.Sprite)
+        : (objB as Phaser.Physics.Arcade.Sprite);
+
+      safeDestroy(proj);
       this.handlePlayerDamage(1, 'Sihir Bayangan');
     });
 
     // Enemy Projectiles hitting Walls
-    this.physics.add.collider(this.enemyProjectiles, this.platformsGroup, (projObj) => {
-      projObj.destroy();
+    this.physics.add.collider(this.enemyProjectiles, this.platformsGroup, (objA, objB) => {
+      const proj = this.enemyProjectiles.contains(objA as any)
+        ? (objA as Phaser.Physics.Arcade.Sprite)
+        : (objB as Phaser.Physics.Arcade.Sprite);
+
+      safeDestroy(proj);
     });
   }
 
@@ -604,7 +638,7 @@ export class GameScene extends Phaser.Scene {
 
     // Animation settle
     this.time.delayedCall(200, () => {
-      if (slash.active) slash.destroy();
+      safeDestroy(slash);
       this.isAttacking = false;
       if (this.player && this.player.active) {
         this.player.setAlpha(1);
@@ -632,7 +666,7 @@ export class GameScene extends Phaser.Scene {
 
     // Auto destroy after 1.5s
     this.time.delayedCall(1500, () => {
-      if (bullet.active) bullet.destroy();
+      safeDestroy(bullet);
     });
   }
 
@@ -659,7 +693,7 @@ export class GameScene extends Phaser.Scene {
           targets: ghost,
           alpha: 0,
           duration: 200,
-          onComplete: () => ghost.destroy(),
+          onComplete: () => safeDestroy(ghost),
         });
       });
     }
@@ -681,11 +715,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private defeatEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
+    if (!enemy || !enemy.active || !(enemy as any).scene) return;
     sound.playEnemyHurt();
     this.score += 50;
     this.createSparkles(enemy.x, enemy.y, 0x10b981);
     this.showFloatingText(enemy.x, enemy.y - 10, '+50', '#34d399');
-    enemy.destroy();
+    safeDestroy(enemy);
     this.broadcastStatus();
   }
 
@@ -734,7 +769,7 @@ export class GameScene extends Phaser.Scene {
         y: this.bossSprite.y - 40,
         duration: 1000,
         onComplete: () => {
-          if (this.bossSprite) this.bossSprite.destroy();
+          safeDestroy(this.bossSprite);
           // Unlock victory gate
           this.gateSprite.setTexture('gate_open');
           this.showFloatingText(this.gateSprite.x, this.gateSprite.y - 30, 'Gerbang Terbuka!', '#38bdf8');
@@ -819,12 +854,12 @@ export class GameScene extends Phaser.Scene {
     this.physics.moveToObject(orb, this.player, 180);
 
     this.time.delayedCall(2500, () => {
-      if (orb.active) orb.destroy();
+      safeDestroy(orb);
     });
   }
 
   private handlePlayerDamage(amount: number, reason: string) {
-    if (!this.player || !this.player.active || !this.player.body) return;
+    if (!this.player || !this.player.active || !this.player.body || !(this.player as any).scene) return;
     if (this.isInvulnerable || this.isDashing) return;
 
     this.playerHp -= amount;
@@ -833,7 +868,10 @@ export class GameScene extends Phaser.Scene {
     this.broadcastStatus();
 
     this.cameras.main.shake(120, 0.008);
-    this.player.setVelocityY(-180);
+
+    // Directional knockback away from danger source
+    const knockDir = this.bossSprite && this.player.x < this.bossSprite.x ? -170 : 170;
+    this.player.setVelocity(knockDir, -220);
 
     // Reset alpha and ensure visibility without WebGL tint shader errors
     this.tweens.killTweensOf(this.player);
@@ -841,15 +879,20 @@ export class GameScene extends Phaser.Scene {
     this.player.setVisible(true);
     this.player.setDepth(30);
 
+    if (this.playerHp <= 0) {
+      this.handleGameOver(reason);
+      return;
+    }
+
     // Invulnerability blinking
     this.tweens.add({
       targets: this.player,
-      alpha: 0.3,
+      alpha: 0.35,
       duration: 100,
       yoyo: true,
       repeat: 3,
       onComplete: () => {
-        if (this.player && this.player.active) {
+        if (this.player && this.player.active && (this.player as any).scene) {
           this.player.setAlpha(1);
           this.player.setVisible(true);
           this.player.setDepth(30);
@@ -857,10 +900,6 @@ export class GameScene extends Phaser.Scene {
         }
       },
     });
-
-    if (this.playerHp <= 0) {
-      this.handleGameOver(reason);
-    }
   }
 
   private handleGameOver(reason: string) {
@@ -927,21 +966,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleCollectCrystal(crystal: Phaser.Physics.Arcade.Sprite) {
+    if (!crystal || !crystal.active || !(crystal as any).scene) return;
     sound.playCrystal();
     this.score += 25;
     this.crystalsCollected += 1;
     this.mana = Math.min(this.maxMana, this.mana + 15);
     this.createSparkles(crystal.x, crystal.y, 0x38bdf8);
-    crystal.destroy();
+    safeDestroy(crystal);
     this.broadcastStatus();
   }
 
   private handleCollectPotion(potion: Phaser.Physics.Arcade.Sprite) {
+    if (!potion || !potion.active || !(potion as any).scene) return;
     sound.playHeal();
     this.playerHp = Math.min(this.maxHp, this.playerHp + 1);
     this.createSparkles(potion.x, potion.y, 0xf43f5e);
     this.showFloatingText(potion.x, potion.y - 10, '+1 HP', '#fda4af');
-    potion.destroy();
+    safeDestroy(potion);
     this.broadcastStatus();
   }
 
@@ -952,7 +993,7 @@ export class GameScene extends Phaser.Scene {
     this.showFloatingText(this.player.x, this.player.y - 20, 'Kunci Kristal Ditemukan!', '#f59e0b');
     if (this.keySprite) {
       this.createSparkles(this.keySprite.x, this.keySprite.y, 0xf59e0b);
-      this.keySprite.destroy();
+      safeDestroy(this.keySprite);
     }
     // Unlock gate visually
     this.gateSprite.setTexture('gate_open');
