@@ -1,0 +1,6 @@
+{
+  "name": "Aetheria: Crystal Legend",
+  "description": "Retro pixel anime fantasy platformer game built with Phaser JS and Vite, featuring responsive controls for desktop, tablet, and mobile.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
